@@ -220,6 +220,7 @@ public class PlayerController : MonoBehaviour
 
     private Animator anim;              
     private GameObject table;              
+    private GameObject popup;
     private Toggle expander;              
     private HashIDs hash;              
 
@@ -230,13 +231,14 @@ public class PlayerController : MonoBehaviour
     {
         anim = GetComponent<Animator>();
         table = GameObject.FindGameObjectWithTag("truthTable");
+        popup = GameObject.FindGameObjectWithTag("popup");
         expander = GameObject.FindGameObjectWithTag("toggle").GetComponent<Toggle>();
         hash = GameObject.FindGameObjectWithTag("GameController").GetComponent<HashIDs>();
     }
 
     void FixedUpdate()
     {
-        if (!SayDialog.GetSayDialog().isActiveAndEnabled && !MenuDialog.GetMenuDialog().isActiveAndEnabled && !table.activeSelf && !expander.isOn)
+        if (!SayDialog.GetSayDialog().isActiveAndEnabled && !MenuDialog.GetMenuDialog().isActiveAndEnabled && !table.activeSelf && !popup.activeSelf && !expander.isOn)
         {
             h = Input.GetAxis("Horizontal");
             v = Input.GetAxis("Vertical");
@@ -317,6 +319,7 @@ public class FloorManager : MonoBehaviour
 
     [Header("UI")]
     public AnswerPanelController answerPanelController;
+    public PopupPanelController popupPanelController;
 
     [Header("Flow")]
     public ScreenFader screenFader;
@@ -350,6 +353,7 @@ public class FloorManager : MonoBehaviour
         statementController = FindObjectOfType<StatementController>();
         answerPanelController = FindObjectOfType<AnswerPanelController>();
         screenFader = FindObjectOfType<ScreenFader>();
+        popupPanelController = FindObjectOfType<PopupPanelController>();
 
         npcSpawnPoints = new Transform[6];
 
@@ -602,7 +606,7 @@ public class FloorManager : MonoBehaviour
         }
 
         if (allCorrect)
-            StartCoroutine(FloorCleared());
+            popupPanelController.ShowAnswerCorrect();
         else
             StartCoroutine(WrongSubmission());
     }
@@ -615,14 +619,15 @@ public class FloorManager : MonoBehaviour
         {
             RevealSolution();
 
-            // Here you can load a GameOver scene or show an overlay.
             Debug.Log("Game Over - reveal current floor solution.");
+
+            popupPanelController.ShowGameOver();
         }
 
         yield return null;
     }
 
-    private IEnumerator FloorCleared()
+    public IEnumerator FloorCleared(bool cleared)
     {
         if (screenFader != null)
             yield return screenFader.FadeOut(0.35f);
@@ -631,12 +636,14 @@ public class FloorManager : MonoBehaviour
 
         if (GameManager.Instance.currentFloor >= finalFloor)
         {
-            // Replace with your victory scene / victory UI
             Debug.Log("Victory!");
+
+            popupPanelController.ShowGameClear();
         }
         else
         {
-            GameManager.Instance.AdvanceFloor();
+            if (cleared)
+                GameManager.Instance.AdvanceFloor();
 
             string currentSceneName = SceneManager.GetActiveScene().name;
             SceneManager.LoadScene(currentSceneName);
@@ -838,15 +845,22 @@ public class TruthTableController : MonoBehaviour
 {
     private GameObject table;
     private GameObject layout;
+    private GameObject popup;
 
     private FloorManager floorManager;
 
     private int npcCount;
 
+    private void Awake()
+    {
+        popup = GameObject.FindGameObjectWithTag("popup");
+    }
+
     private void Start()
     {
         table = GameObject.FindGameObjectWithTag("truthTable");
         layout = GameObject.FindGameObjectWithTag("tableLayout");
+
         floorManager = GameObject.FindGameObjectWithTag("GameController").GetComponent<FloorManager>();
 
         npcCount = floorManager.GetNPCCount();
@@ -871,7 +885,7 @@ public class TruthTableController : MonoBehaviour
 
     private void Update()
     {
-        if (Input.GetKeyDown(KeyCode.T) && !table.activeSelf && !SayDialog.GetSayDialog().isActiveAndEnabled && !MenuDialog.GetMenuDialog().isActiveAndEnabled && npcCount < 5)
+        if (Input.GetKeyDown(KeyCode.T) && !table.activeSelf && !popup.activeSelf && !SayDialog.GetSayDialog().isActiveAndEnabled && !MenuDialog.GetMenuDialog().isActiveAndEnabled && npcCount < 5)
             table.SetActive(true);
 
         if (Input.GetKeyDown(KeyCode.Escape) && table.activeSelf)
@@ -891,6 +905,7 @@ public class AnswerPanelController : MonoBehaviour
 {
     private GameObject statementSet;
     private GameObject rowsContainer;
+    private GameObject popup;
     private Button submitButton;
     private Toggle toggle;
     private TextMeshProUGUI statement;
@@ -904,11 +919,17 @@ public class AnswerPanelController : MonoBehaviour
     private int npcCount;
     private string[] npcLabels = FloorManager.npcLabels;
 
+    private void Awake()
+    {
+        popup = GameObject.FindGameObjectWithTag("popup");
+    }
+
     private void Start()
     {
         statementSet = GameObject.FindGameObjectWithTag("statementSet");
         submitButton = GameObject.FindGameObjectWithTag("submit").GetComponent<Button>();
         toggle = GameObject.FindGameObjectWithTag("toggle").GetComponent<Toggle>();
+
         floorManager = GameObject.FindGameObjectWithTag("GameController").GetComponent<FloorManager>();
 
         npcCount = floorManager.GetNPCCount();
@@ -951,7 +972,7 @@ public class AnswerPanelController : MonoBehaviour
 
     private void Update()
     {
-        if (Input.GetKeyDown(KeyCode.Tab) && !SayDialog.GetSayDialog().isActiveAndEnabled && !MenuDialog.GetMenuDialog().isActiveAndEnabled)
+        if (Input.GetKeyDown(KeyCode.Tab) && !popup.activeSelf && !SayDialog.GetSayDialog().isActiveAndEnabled && !MenuDialog.GetMenuDialog().isActiveAndEnabled)
             toggle.isOn = !toggle.isOn;
     }
 
@@ -1129,6 +1150,14 @@ public class RunInfoController : MonoBehaviour
         healthBar.transform.Find($"{previousHealth}Health").gameObject.SetActive(true);
     }
 
+    private void Update()
+    {
+        if (SayDialog.GetSayDialog().isActiveAndEnabled || MenuDialog.GetMenuDialog().isActiveAndEnabled)
+            menuButton.interactable = false;
+        else
+            menuButton.interactable = true;
+    }
+
     public void ChangeHealth(bool lose)
     {
         healthBar.transform.Find($"{previousHealth}Health").gameObject.SetActive(false);
@@ -1304,6 +1333,154 @@ public class ToggleIcon : MonoBehaviour
     private void UpdateIcon(bool isExpanded)
     {
         icon.sprite = isExpanded ? isOnIcon : isOffIcon;
+    }
+}
+
+=================== ./UI/PopupPanelController.cs ===================
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+using UnityEngine.UI;
+using UnityEngine.SceneManagement;
+using Fungus;
+using TMPro;
+
+public class PopupPanelController : MonoBehaviour
+{
+    private GameObject popup;
+    private GameObject panel;
+    private GameObject table;
+    private GameObject answer;
+    private Toggle toggle;
+    private TextMeshProUGUI statement;
+
+    private FloorManager floorManager;
+
+    private GameObject layout;
+
+    private Button option1;
+    private Button option2;
+    private Button option3;
+
+    private void Awake()
+    {
+        table = GameObject.FindGameObjectWithTag("truthTable");
+        answer = GameObject.FindGameObjectWithTag("answer");
+        toggle = GameObject.FindGameObjectWithTag("toggle").GetComponent<Toggle>();
+    }
+
+    private void Start()
+    {
+        popup = GameObject.FindGameObjectWithTag("popup");
+        panel = popup.transform.Find("panel").gameObject;
+        floorManager = GameObject.FindGameObjectWithTag("GameController").GetComponent<FloorManager>();
+
+        popup.SetActive(false);
+    }
+
+    public void ShowAnswerCorrect()
+    {
+        popup.SetActive(true);
+        layout = panel.transform.Find("answerCorrect").gameObject;
+        layout.SetActive(true);
+
+        table.SetActive(false);
+        toggle.isOn = false;
+
+        option1 = layout.transform.Find("continue").gameObject.GetComponent<Button>();
+        option2 = layout.transform.Find("exit").gameObject.GetComponent<Button>();
+
+        option1.onClick.AddListener(RunFloorCleared);
+        option2.onClick.AddListener(ReturnTitle);
+    }
+
+    public void ShowGameClear()
+    {
+        popup.SetActive(true);
+        layout = panel.transform.Find("gameClear").gameObject;
+        layout.SetActive(true);
+
+        table.SetActive(false);
+        toggle.isOn = false;
+
+        option1 = layout.transform.Find("retry").gameObject.GetComponent<Button>();
+        option2 = layout.transform.Find("exit").gameObject.GetComponent<Button>();
+
+        option1.onClick.AddListener(Retry);
+        option2.onClick.AddListener(ReturnTitle);
+    }
+
+    public void ShowGameOver()
+    {
+        popup.SetActive(true);
+        layout = panel.transform.Find("gameOver").gameObject;
+        layout.SetActive(true);
+
+        GameObject solution = layout.transform.Find("solution").gameObject;
+        GameObject solutionPanel = GameObject.Instantiate(answer.transform.Find("panel").gameObject, solution.transform);
+
+        RectTransform solutionPanelRect = solutionPanel.GetComponent<RectTransform>();
+        RectTransform solutionRect = solution.GetComponent<RectTransform>();
+
+        solutionPanelRect.anchorMin = solutionRect.anchorMin;
+        solutionPanelRect.anchorMax = solutionRect.anchorMax;
+        solutionPanelRect.pivot = solutionRect.pivot;
+
+        solutionPanelRect.anchoredPosition = solutionRect.anchoredPosition;
+
+        float scaleX = solutionRect.rect.size.x / solutionPanelRect.rect.size.x;
+        float scaleY = solutionRect.rect.size.y / solutionPanelRect.rect.size.y;
+
+        solutionPanel.transform.localScale = new Vector3(scaleX, scaleY, 1f);
+
+        table.SetActive(false);
+        toggle.isOn = false;
+
+        option1 = layout.transform.Find("retry").gameObject.GetComponent<Button>();
+        option2 = layout.transform.Find("exit").gameObject.GetComponent<Button>();
+
+        option1.onClick.AddListener(Retry);
+        option2.onClick.AddListener(ReturnTitle);
+    }
+
+    public void ShowPause()
+    {
+        popup.SetActive(true);
+        layout = panel.transform.Find("pause").gameObject;
+        layout.SetActive(true);
+
+        table.SetActive(false);
+        toggle.isOn = false;
+
+        option1 = layout.transform.Find("exit").gameObject.GetComponent<Button>();
+        option2 = layout.transform.Find("retry").gameObject.GetComponent<Button>();
+        option3 = layout.transform.Find("cancel").gameObject.GetComponent<Button>();
+
+        option1.onClick.AddListener(ReturnTitle);
+        option2.onClick.AddListener(Retry);
+        option3.onClick.AddListener(Cancel);
+    }
+
+    private void RunFloorCleared()
+    {
+        floorManager.StartCoroutine(floorManager.FloorCleared(true));
+    }
+
+    private void ReturnTitle()
+    {
+        SceneManager.LoadScene("title");
+    }
+
+    private void Retry()
+    {
+        GameManager.Instance.StartNewRun();
+        floorManager.StartCoroutine(floorManager.FloorCleared(false));
+    }
+
+    private void Cancel()
+    {
+        layout.SetActive(false);
+        popup.SetActive(false);
     }
 }
 
@@ -2292,4 +2469,3 @@ public enum Role
     Knave = 2,
     Peasant = 3
 }
-
